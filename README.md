@@ -1,6 +1,6 @@
 # AI Resume Evaluator
 
-An AI-powered Resume Evaluator built with Python that analyzes resumes and provides structured feedback using Google's Gemini API.
+An AI-powered Resume Evaluator built with Python that analyzes PDF and DOCX resumes using the Groq API and returns structured feedback.
 
 ## Features
 
