@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 from groq import Groq
+import json
 
 load_dotenv()
 
@@ -13,7 +14,7 @@ if not my_api_key:
 
 client = Groq(api_key=my_api_key)
 
-model= "llama-3.3-70b-versatile"
+model= "openai/gpt-oss-20b"
 # role="user"
 
 from pydantic import BaseModel
@@ -36,123 +37,63 @@ message_system = {
     "role":"system",
     "content":system_prompt
 }
-job_description = """
-Job Title: AI Engineer
+def parse_job_description(job_description: str):
 
-Company: Amazon
+    schema = Description.model_json_schema()
 
-Location: Bengaluru, India
+    system_prompt = f"""
+    Return the output in JSON format strictly following this schema:
 
-Job Type: Full-Time
+    {schema}
+    """
 
-Job Description:
+    message_system = {
+        "role": "system",
+        "content": system_prompt
+    }
 
-Amazon is looking for a talented AI Engineer to design, develop, and deploy scalable artificial intelligence solutions that improve customer experience and optimize business operations. You will collaborate with software engineers, data scientists, and product managers to build production-ready machine learning and generative AI applications.
+    prompt = f"""
+    Extract the following information from the job description:
 
-Key Responsibilities:
+    - Job title
+    - Required skills (return as a list of individual skills)
+    - Preferred skills (return as a list)
+    - Required experience (return only the number of years if mentioned)
+    - Education (return a short phrase)
 
-- Design and develop AI-powered applications using Large Language Models (LLMs).
-- Build and optimize machine learning models for production.
-- Develop REST APIs for AI services.
-- Integrate AI models with cloud-based applications.
-- Work with cross-functional teams to understand business requirements.
-- Optimize model performance, latency, and scalability.
-- Write clean, maintainable, and well-documented code.
-- Participate in code reviews and technical discussions.
+    Do not merge multiple skills into one sentence.
 
-Required Qualifications:
+    JOB DESCRIPTION:
+    {job_description}
+    """
 
-- Bachelor's or Master's degree in Computer Science, Artificial Intelligence, Data Science, or a related field.
-- 2+ years of software development experience.
-- Strong programming skills in Python.
-- Experience with machine learning concepts.
-- Experience working with Large Language Models (LLMs).
-- Knowledge of Prompt Engineering techniques.
-- Experience with FastAPI or Flask.
-- Strong understanding of REST APIs.
-- Experience with SQL and relational databases.
-- Familiarity with Git and GitHub.
-- Strong problem-solving and debugging skills.
-- Excellent communication and teamwork skills.
+    message = {
+        "role": "user",
+        "content": prompt
+    }
 
-Preferred Qualifications:
+    messages = [message_system, message]
 
-- Experience with LangChain or LlamaIndex.
-- Experience deploying AI applications on AWS.
-- Knowledge of Docker and Kubernetes.
-- Experience with vector databases such as Pinecone, ChromaDB, or FAISS.
-- Familiarity with Retrieval-Augmented Generation (RAG).
-- Experience with CI/CD pipelines.
-- Knowledge of cloud-native architectures.
+    response_format = {
+        "type": "json_object"
+    }
 
-Technical Skills:
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        response_format=response_format
+    )
 
-Programming Languages:
-- Python
-- SQL
+    answer = response.choices[0].message.content
 
-Frameworks:
-- FastAPI
-- Flask
-- LangChain
+    job_data = json.loads(answer)
 
-Cloud:
-- AWS
+    job = Description(**job_data)
 
-Databases:
-- PostgreSQL
-- MySQL
-
-Tools:
-- Git
-- Docker
-- Kubernetes
-
-AI/ML:
-- Machine Learning
-- Deep Learning
-- LLMs
-- Prompt Engineering
-- RAG
-- Vector Databases
-
-Benefits:
-
-- Competitive salary
-- Health insurance
-- Performance bonus
-- Employee stock options
-- Learning and development programs
-- Flexible work environment
-"""
-prompt = f"""
-Extract the following information from the job description:
-
-- Job title
-- Required skills (return as a list of individual skills)
-- Preferred skills (return as a list)
-- Required experience (return only the number of years if mentioned)
-- Education (return a short phrase)
-
-Do not merge multiple skills into one sentence.
-{job_description}
-"""
-message = {
-    "role":"user",
-    "content":prompt
-}
-messages = [message_system,message]
-response = client.chat.completions.create(model=model,messages=messages,response_format=response_format)
-answer = response.choices[0].message.content
-# print(answer)
-
-import json
-raw_json = answer
-job_data = json.loads(raw_json)
-job = Description(**job_data)
+    return job
 
 
-print(job.job_title)
+# print(job.job_title)
 # print(job.required_skils)
 # print(job.preffered_skills)
 
@@ -271,7 +212,7 @@ def parse_resume(resume_text):
     }
 
     prompt = f"""
-    Parse the following resume:
+    Parse the following resume
 
     {resume_text}
     """
@@ -313,7 +254,7 @@ def read_docx(file_path):
     text = ""
     
     for paragraph in document.paragraphs:
-        # paragraph_text = paragraphs.extract_text();
+        # paragraph_text = paragraphs.extract_text();   #! okay here i cant do this extract text because here the text is in continous format which can have a lot of spaces and all so we need to remove those spaces and make the output clear this is why we use strip.
         if paragraph.text.strip():
             text+=paragraph.text + "\n"
 
@@ -334,54 +275,42 @@ def read_resume(file_path):
         return None
     
 
-resume_folder = Path("resumes")
-all_results = []
-for file_path in resume_folder.iterdir():
-    if file_path.suffix.lower() not in [".pdf" , ".docx"]:
-        continue
-    print("\nProcessing:", file_path.name)
+def analyze_resume(file_path, job_description):
+
+    # Convert the raw job description into structured job data
+    job = parse_job_description(job_description)
+
+    # Read the resume
     resume_text = read_resume(file_path)
+
+    # Parse the resume
     parsed_resume = parse_resume(resume_text)
-    time.sleep(5)
-    result = final_result(job,parsed_resume)
-    time.sleep(5)
-    print("Score:" ,result.score)
-    all_results.append({
-        "name":parsed_resume.name,
-        "score":result.score,
-        "details":result.details
-    })
 
-all_results.sort(
-    key=lambda candidate: candidate["score"],
-    reverse=True
-)
-top_2 = all_results[:2]
-worst_2 = all_results[-2:]
+    # Compare the resume with the job description
+    result = final_result(job, parsed_resume)
 
-print("TOP 2 CANDIDATES")
-for candidate in top_2:
+    return {
+        "name": parsed_resume.name,
+        "score": result.score,
+        "details": result.details
+    }
 
-    print(
-        candidate["name"],
-        "-",
-        candidate["score"],
-        "%"
+
+if __name__ == "__main__":
+
+    job_description = """
+    We are looking for a Python Developer with experience in FastAPI,
+    REST APIs, SQL, Git, and machine learning.
+    """
+
+    file_path = Path("resumes/Harshit_Khatri_resume.pdf")
+
+    result = analyze_resume(
+        file_path,
+        job_description
     )
 
-    print(candidate["details"])
-
-print("LOWEST 2 CANDIDATES")
-for candidate in worst_2:
-
-    print(
-        candidate["name"],
-        "-",
-        candidate["score"],
-        "%"
-    )
-    print(candidate["details"])
-
+    print(result)
 
 
 
